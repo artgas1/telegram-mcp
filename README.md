@@ -7,267 +7,109 @@
 [![Python Lint & Format Check](https://github.com/chigwell/telegram-mcp/actions/workflows/python-lint-format.yml/badge.svg)](https://github.com/chigwell/telegram-mcp/actions/workflows/python-lint-format.yml)
 [![Docker Build & Compose Validation](https://github.com/chigwell/telegram-mcp/actions/workflows/docker-build.yml/badge.svg)](https://github.com/chigwell/telegram-mcp/actions/workflows/docker-build.yml)
 
----
+A Telegram integration for Claude, Cursor, and other MCP-compatible clients. It exposes Telegram account, chat, message, contact, media, folder, and admin operations through the [Model Context Protocol](https://modelcontextprotocol.io/) using [Telethon](https://docs.telethon.dev/).
 
 ## 🤖 MCP in Action
 
-Here's a demonstration of the Telegram MCP capabilities in [Claude](https://docs.anthropic.com/en/docs/agents-and-tools/mcp):
-
- **Basic usage example:**
+Basic Telegram MCP usage in Claude:
 
 ![Telegram MCP in action](screenshots/1.png)
 
-1. **Example: Asking Claude to analyze chat history and send a response:**
+Asking Claude to analyze chat history and send a response:
 
 ![Telegram MCP Request](screenshots/2.png)
 
-2. **Successfully sent message to the group:**
+Message sent successfully:
 
 ![Telegram MCP Result](screenshots/3.png)
 
-As you can see, the AI can seamlessly interact with your Telegram account, retrieving and displaying your chats, messages, and other data in a natural way.
+## Contents
 
----
+- [What It Can Do](#what-it-can-do)
+- [Requirements](#requirements)
+- [Quick Start](#quick-start)
+- [MCP Client Configuration](#mcp-client-configuration)
+- [Multi-Account Setup](#multi-account-setup)
+- [Proxy Support](#proxy-support)
+- [File Path Security](#file-path-security)
+- [Docker](#docker)
+- [Development](#development)
+- [Security Notes](#security-notes)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
 
-A full-featured Telegram integration for Claude, Cursor, and any MCP-compatible client, powered by [Telethon](https://docs.telethon.dev/) and the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). This project lets you interact with your Telegram account programmatically, automating everything from messaging to group management.
+## What It Can Do
 
+The server currently includes 80+ MCP tools grouped into these areas:
 
----
+- **Accounts:** list configured accounts and route tool calls by account label.
+- **Chats and groups:** list chats, inspect metadata, create groups/channels, join or leave chats, invite users, manage admins, bans, default permissions, slow mode, topics, invite links, common chats, read receipts, and message links.
+- **Messages:** send, schedule, edit, delete, forward, pin, unpin, mark read, reply, search, inspect context, create polls, manage reactions, inspect inline buttons, and press inline callbacks.
+- **Contacts:** list, search, add, delete, block, unblock, import, export, inspect direct chats, and find recent contact interactions.
+- **Media:** send files, download media, upload files, send voice notes, stickers, GIFs, and inspect message media.
+- **Profile and privacy:** get your own account info, update profile fields, set or delete profile photos, inspect privacy settings, get user info/photos/status, and manage bot commands.
+- **Folders and drafts:** list, create, update, reorder, and delete Telegram folders; save, list, and clear drafts.
 
-## 🚀 Features & Tools
+All tool results that include Telegram user-controlled content are sanitized and, where practical, returned as structured JSON.
 
-This MCP server exposes a huge suite of Telegram tools. **Every major Telegram/Telethon feature is available as a tool!**
+## Requirements
 
-### Chat & Group Management
-- **get_chats(page, page_size)**: Paginated list of chats
-- **list_chats(chat_type, limit)**: List chats with metadata and filtering
-- **get_chat(chat_id)**: Detailed info about a chat
-- **create_group(title, user_ids)**: Create a new group
-- **invite_to_group(group_id, user_ids)**: Invite users to a group or channel
-- **create_channel(title, about, megagroup)**: Create a channel or supergroup
-- **edit_chat_title(chat_id, title)**: Change chat/group/channel title
-- **delete_chat_photo(chat_id)**: Remove chat/group/channel photo
-- **leave_chat(chat_id)**: Leave a group or channel
-- **get_participants(chat_id)**: List all participants
-- **get_admins(chat_id)**: List all admins
-- **get_banned_users(chat_id)**: List all banned users
-- **promote_admin(chat_id, user_id)**: Promote user to admin
-- **demote_admin(chat_id, user_id)**: Demote admin to user
-- **ban_user(chat_id, user_id)**: Ban user
-- **unban_user(chat_id, user_id)**: Unban user
-- **get_invite_link(chat_id)**: Get invite link
-- **export_chat_invite(chat_id)**: Export invite link
-- **import_chat_invite(hash)**: Join chat by invite hash
-- **join_chat_by_link(link)**: Join chat by invite link
-- **subscribe_public_channel(channel)**: Subscribe to a public channel or supergroup by username or ID
-
-### Messaging
-- **get_messages(chat_id, page, page_size)**: Paginated messages
-- **list_messages(chat_id, limit, search_query, from_date, to_date)**: Filtered messages
-- **list_topics(chat_id, limit, offset_topic, search_query)**: List forum topics in supergroups
-- **send_message(chat_id, message)**: Send a message
-- **reply_to_message(chat_id, message_id, text)**: Reply to a message
-- **edit_message(chat_id, message_id, new_text)**: Edit your message
-- **delete_message(chat_id, message_id)**: Delete a message
-- **forward_message(from_chat_id, message_id, to_chat_id)**: Forward a message
-- **pin_message(chat_id, message_id)**: Pin a message
-- **unpin_message(chat_id, message_id)**: Unpin a message
-- **mark_as_read(chat_id)**: Mark all as read
-- **get_message_context(chat_id, message_id, context_size)**: Context around a message
-- **get_history(chat_id, limit)**: Full chat history
-- **get_pinned_messages(chat_id)**: List pinned messages
-- **get_last_interaction(contact_id)**: Most recent message with a contact
-- **create_poll(chat_id, question, options, multiple_choice, quiz_mode, public_votes, close_date)**: Create a poll
-- **list_inline_buttons(chat_id, message_id, limit)**: Inspect inline keyboards to discover button text/index
-- **press_inline_button(chat_id, message_id, button_text, button_index)**: Trigger inline keyboard callbacks by label or index
--  **send_reaction(chat_id, message_id, emoji, big=False)**: Add a reaction to a message
--  **remove_reaction(chat_id, message_id)**: Remove a reaction from a message
--  **get_message_reactions(chat_id, message_id, limit=50)**: Get all reactions on a message
-
-### Contact Management
-- **list_contacts()**: List all contacts
-- **search_contacts(query)**: Search contacts
-- **add_contact(phone, first_name, last_name)**: Add a contact
-- **delete_contact(user_id)**: Delete a contact
-- **block_user(user_id)**: Block a user
-- **unblock_user(user_id)**: Unblock a user
-- **import_contacts(contacts)**: Bulk import contacts
-- **export_contacts()**: Export all contacts as JSON
-- **get_blocked_users()**: List blocked users
-- **get_contact_ids()**: List all contact IDs
-- **get_direct_chat_by_contact(contact_query)**: Find direct chat with a contact
-- **get_contact_chats(contact_id)**: List all chats with a contact
-
-### User & Profile
-- **get_me()**: Get your user info
-- **update_profile(first_name, last_name, about)**: Update your profile
-- **set_profile_photo(file_path)**: Set a profile photo from an allowed root path
-- **delete_profile_photo()**: Remove your profile photo
-- **get_user_photos(user_id, limit)**: Get a user's profile photos
-- **get_user_status(user_id)**: Get a user's online status
-
-### Media
-- **get_media_info(chat_id, message_id)**: Get info about media in a message
-- **send_file(chat_id, file_path, caption)**: Send a local file from allowed roots
-- **download_media(chat_id, message_id, file_path)**: Save message media under allowed roots
-- **upload_file(file_path)**: Upload a local file and return upload metadata
-- **send_voice(chat_id, file_path)**: Send `.ogg/.opus` voice note from allowed roots
-- **send_sticker(chat_id, file_path)**: Send `.webp` sticker from allowed roots
-- **edit_chat_photo(chat_id, file_path)**: Update chat photo from allowed roots
-
-### Search & Discovery
-- **search_public_chats(query, limit)**: Search public chats/channels/bots with a configurable result limit
-- **search_messages(chat_id, query, limit)**: Search messages in a chat
-- **search_global(query, page, page_size)**: Search messages globally with pagination
-- **resolve_username(username)**: Resolve a username to ID
-
-### Stickers, GIFs, Bots
-- **get_sticker_sets()**: List sticker sets
-- **get_bot_info(bot_username)**: Get info about a bot
-- **set_bot_commands(bot_username, commands)**: Set bot commands (bot accounts only)
-
-### Privacy, Settings, and Misc
-- **get_privacy_settings()**: Get privacy settings
-- **set_privacy_settings(key, allow_users, disallow_users)**: Set privacy settings
-- **mute_chat(chat_id)**: Mute notifications
-- **unmute_chat(chat_id)**: Unmute notifications
-- **archive_chat(chat_id)**: Archive a chat
-- **unarchive_chat(chat_id)**: Unarchive a chat
-- **get_recent_actions(chat_id)**: Get recent admin actions
-
-### Drafts
-- **save_draft(chat_id, message, reply_to_msg_id, no_webpage)**: Save a draft message to a chat/channel
-- **get_drafts()**: Get all draft messages across all chats
-- **clear_draft(chat_id)**: Clear/delete a draft from a specific chat
-
-### Input Validation
-
-To improve robustness, all functions accepting `chat_id` or `user_id` parameters now include input validation. You can use any of the following formats for these IDs:
-
--   **Integer ID**: The direct integer ID for a user, chat, or channel (e.g., `123456789` or `-1001234567890`).
--   **String ID**: The integer ID provided as a string (e.g., `"123456789"`).
--   **Username**: The public username for a user or channel (e.g., `"@username"` or `"username"`).
-
-The server will automatically validate the input and convert it to the correct format before making a request to Telegram. If the input is invalid, a clear error message will be returned.
-
-## File-path Tools Security Model
-
-File-path tools are available, but **disabled by default** until allowed roots are configured.
-
-Supported file-path tools:
-- `send_file`, `download_media`, `set_profile_photo`, `edit_chat_photo`, `send_voice`, `send_sticker`, `upload_file`
-
-Security semantics (aligned with MCP filesystem server):
-- Server-side allowlist via CLI positional arguments (fallback when Roots API is unsupported).
-- Client-provided MCP Roots replace the server allowlist when available.
-- If the client returns an empty Roots list, file-path tools are disabled (deny-all).
-- All paths are resolved via realpath and must stay inside an allowed root.
-- Traversal/glob-like patterns are rejected (`..`, `*`, `?`, `~`, etc.).
-- Relative paths resolve against the first allowed root.
-- Write tools default to `<first_root>/downloads/` when `file_path` is omitted.
-
-Example server launch with allowlisted roots:
-```bash
-uv --directory /full/path/to/telegram-mcp run main.py /data/telegram /tmp/telegram-mcp
-```
-
-GIF tools are currently limited: `get_gif_search` and `send_gif` are available, while `get_saved_gifs` is not implemented due to reliability limits in Telethon/Telegram API interactions.
-
----
-
-## 📋 Requirements
 - Python 3.10+
-- [Telethon](https://docs.telethon.dev/)
-- [MCP Python SDK](https://modelcontextprotocol.io/docs/)
-- [Claude Desktop](https://claude.ai/desktop) or [Cursor](https://cursor.so/) (or any MCP client)
+- Telegram API credentials from [my.telegram.org/apps](https://my.telegram.org/apps)
+- A Telegram session string or file-based session
+- An MCP client such as Claude Desktop, Cursor, or another MCP-compatible host
+- Optional: [uv](https://docs.astral.sh/uv/) for local development
 
----
+## Quick Start
 
-## 🔧 Installation & Setup
+> Do not install this server with `uvx telegram-mcp`, `uvx --from telegram-mcp`,
+> or `pip install telegram-mcp`. The `telegram-mcp` name on PyPI is currently
+> owned by a different project and does not install this repository. Passing
+> `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, or `TELEGRAM_SESSION_STRING` to that
+> package can expose Telegram account credentials to unrelated third-party code.
 
-### 1. Fork & Clone
+### 1. Clone and Install
 
 ```bash
 git clone https://github.com/chigwell/telegram-mcp.git
 cd telegram-mcp
-```
-
-### 2. Install Dependencies with uv
-
-```bash
 uv sync
 ```
 
-### 3. Generate a Session String
+### 2. Generate a Session String
 
 ```bash
 uv run session_string_generator.py
 ```
-Follow the prompts to authenticate and update your `.env` file.
 
-### 4. Configure .env
+Follow the prompts. Save the generated session string securely.
 
-Copy `.env.example` to `.env` and fill in your values:
+### 3. Configure Environment
 
+Copy the example file and fill in your real values:
+
+```bash
+cp .env.example .env
 ```
+
+Single-account setup:
+
+```env
 TELEGRAM_API_ID=your_api_id_here
 TELEGRAM_API_HASH=your_api_hash_here
-TELEGRAM_SESSION_NAME=anon
 TELEGRAM_SESSION_STRING=your_session_string_here
 ```
-Get your API credentials at [my.telegram.org/apps](https://my.telegram.org/apps).
 
----
-
-## 🐳 Running with Docker
-
-If you have Docker and Docker Compose installed, you can build and run the server in a container, simplifying dependency management.
-
-### 1. Build the Image
-
-From the project root directory, build the Docker image:
+Run the server locally:
 
 ```bash
-docker build -t telegram-mcp:latest .
+uv run main.py
 ```
 
-### 2. Running the Container
+## MCP Client Configuration
 
-You have two options:
-
-**Option A: Using Docker Compose (Recommended for Local Use)**
-
-This method uses the `docker-compose.yml` file and automatically reads your credentials from a `.env` file.
-
-1.  **Create `.env` File:** Ensure you have a `.env` file in the project root containing your `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, and `TELEGRAM_SESSION_STRING` (or `TELEGRAM_SESSION_NAME`). Use `.env.example` as a template.
-2.  **Run Compose:**
-    ```bash
-    docker compose up --build
-    ```
-    *   Use `docker compose up -d` to run in detached mode (background).
-    *   Press `Ctrl+C` to stop the server.
-
-**Option B: Using `docker run`**
-
-You can run the container directly, passing credentials as environment variables.
-
-```bash
-docker run -it --rm \
-  -e TELEGRAM_API_ID="YOUR_API_ID" \
-  -e TELEGRAM_API_HASH="YOUR_API_HASH" \
-  -e TELEGRAM_SESSION_STRING="YOUR_SESSION_STRING" \
-  telegram-mcp:latest
-```
-*   Replace placeholders with your actual credentials.
-*   Use `-e TELEGRAM_SESSION_NAME=your_session_file_name` instead of `TELEGRAM_SESSION_STRING` if you prefer file-based sessions (requires volume mounting, see `docker-compose.yml` for an example).
-*   The `-it` flags are crucial for interacting with the server.
-
----
-
-## ⚙️ Configuration for Claude & Cursor
-
-### MCP Configuration
-Edit your Claude desktop config (e.g. `~/Library/Application Support/Claude/claude_desktop_config.json`) or Cursor config (`~/.cursor/mcp.json`):
+For Claude Desktop or Cursor, point the MCP server at a cloned checkout of
+this project:
 
 ```json
 {
@@ -279,435 +121,302 @@ Edit your Claude desktop config (e.g. `~/Library/Application Support/Claude/clau
         "/full/path/to/telegram-mcp",
         "run",
         "main.py"
-      ]
+      ],
+      "env": {
+        "TELEGRAM_API_ID": "your_api_id_here",
+        "TELEGRAM_API_HASH": "your_api_hash_here",
+        "TELEGRAM_SESSION_STRING": "your_session_string_here"
+      }
     }
   }
 }
 ```
 
-## 📝 Tool Examples with Code & Output
+Alternatively, install this repository directly from GitHub into a virtual
+environment using a specific release tag or commit:
 
-Below are examples of the most commonly used tools with their implementation and sample output.
-
-### Getting Your Chats
-
-```python
-@mcp.tool()
-async def get_chats(page: int = 1, page_size: int = 20) -> str:
-    """
-    Get a paginated list of chats.
-    Args:
-        page: Page number (1-indexed).
-        page_size: Number of chats per page.
-    """
-    try:
-        dialogs = await client.get_dialogs()
-        start = (page - 1) * page_size
-        end = start + page_size
-        if start >= len(dialogs):
-            return "Page out of range."
-        chats = dialogs[start:end]
-        lines = []
-        for dialog in chats:
-            entity = dialog.entity
-            chat_id = entity.id
-            title = getattr(entity, "title", None) or getattr(entity, "first_name", "Unknown")
-            lines.append(f"Chat ID: {chat_id}, Title: {title}")
-        return "\n".join(lines)
-    except Exception as e:
-        logger.exception(f"get_chats failed (page={page}, page_size={page_size})")
-        return "An error occurred (code: GETCHATS-ERR-001). Check mcp_errors.log for details."
+```bash
+python -m venv .venv
+. .venv/bin/activate
+pip install "git+https://github.com/chigwell/telegram-mcp.git@<tag-or-commit>"
 ```
 
-Example output:
-```
-Chat ID: 123456789, Title: John Doe
-Chat ID: -100987654321, Title: My Project Group
-Chat ID: 111223344, Title: Jane Smith
-Chat ID: -200123456789, Title: News Channel
-```
+Then configure your MCP client to run the installed console script:
 
-### Sending Messages
-
-```python
-@mcp.tool()
-async def send_message(chat_id: int, message: str) -> str:
-    """
-    Send a message to a specific chat.
-    Args:
-        chat_id: The ID of the chat.
-        message: The message content to send.
-    """
-    try:
-        entity = await client.get_entity(chat_id)
-        await client.send_message(entity, message)
-        return "Message sent successfully."
-    except Exception as e:
-        logger.exception(f"send_message failed (chat_id={chat_id})")
-        return "An error occurred (code: SENDMSG-ERR-001). Check mcp_errors.log for details."
-```
-
-Example output:
-```
-Message sent successfully.
-```
-
-### Listing Inline Buttons
-
-```python
-@mcp.tool()
-async def list_inline_buttons(
-    chat_id: Union[int, str],
-    message_id: Optional[int] = None,
-    limit: int = 20,
-) -> str:
-    """
-    Discover inline keyboard layout, including button indices, callback availability, and URLs.
-    """
-```
-
-Example usage:
-```
-list_inline_buttons(chat_id="@sample_tasks_bot")
-```
-
-This returns something like:
-```
-Buttons for message 42 (date 2025-01-01 12:00:00+00:00):
-[0] text='📋 View tasks', callback=yes
-[1] text='ℹ️ Help', callback=yes
-[2] text='🌐 Visit site', callback=no, url=https://example.org
-```
-
-### Pressing Inline Buttons
-
-```python
-@mcp.tool()
-async def press_inline_button(
-    chat_id: Union[int, str],
-    message_id: Optional[int] = None,
-    button_text: Optional[str] = None,
-    button_index: Optional[int] = None,
-) -> str:
-    """
-    Press an inline keyboard button by label or zero-based index.
-    If message_id is omitted, the server searches recent messages for the latest inline keyboard.
-    """
-```
-
-Example usage:
-```
-press_inline_button(chat_id="@sample_tasks_bot", button_text="📋 View tasks")
-```
-
-Use `list_inline_buttons` first if you need to inspect available buttons—pass a bogus `button_text`
-to quickly list options or call `list_inline_buttons` directly. Once you know the text or index,
-`press_inline_button` sends the callback, just like tapping the button in a native Telegram client.
-
-### Subscribing to Public Channels
-
-```python
-@mcp.tool()
-async def subscribe_public_channel(channel: Union[int, str]) -> str:
-    """
-    Join a public channel or supergroup by username (e.g., "@examplechannel") or ID.
-    """
-```
-
-Example usage:
-```
-subscribe_public_channel(channel="@daily_updates_feed")
-```
-
-If the account is already a participant, the tool reports that instead of failing, making it safe to
-run repeatedly in workflows that need idempotent joins.
-
-### Getting Chat Invite Links
-
-The `get_invite_link` function is particularly robust with multiple fallback methods:
-
-```python
-@mcp.tool()
-async def get_invite_link(chat_id: int) -> str:
-    """
-    Get the invite link for a group or channel.
-    """
-    try:
-        entity = await client.get_entity(chat_id)
-        
-        # Try using ExportChatInviteRequest first
-        try:
-            from telethon.tl import functions
-            result = await client(functions.messages.ExportChatInviteRequest(
-                peer=entity
-            ))
-            return result.link
-        except AttributeError:
-            # If the function doesn't exist in the current Telethon version
-            logger.warning("ExportChatInviteRequest not available, using alternative method")
-        except Exception as e1:
-            # If that fails, log and try alternative approach
-            logger.warning(f"ExportChatInviteRequest failed: {e1}")
-            
-        # Alternative approach using client.export_chat_invite_link
-        try:
-            invite_link = await client.export_chat_invite_link(entity)
-            return invite_link
-        except Exception as e2:
-            logger.warning(f"export_chat_invite_link failed: {e2}")
-            
-        # Last resort: Try directly fetching chat info
-        try:
-            if isinstance(entity, (Chat, Channel)):
-                full_chat = await client(functions.messages.GetFullChatRequest(
-                    chat_id=entity.id
-                ))
-                if hasattr(full_chat, 'full_chat') and hasattr(full_chat.full_chat, 'invite_link'):
-                    return full_chat.full_chat.invite_link or "No invite link available."
-        except Exception as e3:
-            logger.warning(f"GetFullChatRequest failed: {e3}")
-            
-        return "Could not retrieve invite link for this chat."
-    except Exception as e:
-        logger.exception(f"get_invite_link failed (chat_id={chat_id})")
-        return f"Error getting invite link: {e}"
-```
-
-Example output:
-```
-https://t.me/+AbCdEfGhIjKlMnOp
-```
-
-### Joining Chats via Invite Links
-
-```python
-@mcp.tool()
-async def join_chat_by_link(link: str) -> str:
-    """
-    Join a chat by invite link.
-    """
-    try:
-        # Extract the hash from the invite link
-        if '/' in link:
-            hash_part = link.split('/')[-1]
-            if hash_part.startswith('+'):
-                hash_part = hash_part[1:]  # Remove the '+' if present
-        else:
-            hash_part = link
-            
-        # Try checking the invite before joining
-        try:
-            # Try to check invite info first (will often fail if not a member)
-            invite_info = await client(functions.messages.CheckChatInviteRequest(hash=hash_part))
-            if hasattr(invite_info, 'chat') and invite_info.chat:
-                # If we got chat info, we're already a member
-                chat_title = getattr(invite_info.chat, 'title', 'Unknown Chat')
-                return f"You are already a member of this chat: {chat_title}"
-        except Exception:
-            # This often fails if not a member - just continue
-            pass
-            
-        # Join the chat using the hash
-        result = await client(functions.messages.ImportChatInviteRequest(hash=hash_part))
-        if result and hasattr(result, 'chats') and result.chats:
-            chat_title = getattr(result.chats[0], 'title', 'Unknown Chat')
-            return f"Successfully joined chat: {chat_title}"
-        return f"Joined chat via invite hash."
-    except Exception as e:
-        err_str = str(e).lower()
-        if "expired" in err_str:
-            return "The invite hash has expired and is no longer valid."
-        elif "invalid" in err_str:
-            return "The invite hash is invalid or malformed."
-        elif "already" in err_str and "participant" in err_str:
-            return "You are already a member of this chat."
-        logger.exception(f"join_chat_by_link failed (link={link})")
-        return f"Error joining chat: {e}"
-```
-
-Example output:
-```
-Successfully joined chat: Developer Community
-```
-
-### Searching Public Chats
-
-```python
-@mcp.tool()
-async def search_public_chats(query: str, limit: int = 20) -> str:
-    """
-    Search for public chats, channels, or bots by username or title.
-    """
-    try:
-        result = await client(functions.contacts.SearchRequest(q=query, limit=limit))
-        entities = [format_entity(e) for e in result.chats + result.users]
-        return json.dumps(entities, indent=2)
-    except Exception as e:
-        return f"Error searching public chats: {e}"
-```
-
-Example output:
 ```json
-[
-  {
-    "id": 123456789,
-    "name": "TelegramBot",
-    "type": "user",
-    "username": "telegram_bot"
-  },
-  {
-    "id": 987654321,
-    "name": "Telegram News",
-    "type": "user",
-    "username": "telegram_news"
+{
+  "mcpServers": {
+    "telegram-mcp": {
+      "command": "/full/path/to/.venv/bin/telegram-mcp",
+      "env": {
+        "TELEGRAM_API_ID": "your_api_id_here",
+        "TELEGRAM_API_HASH": "your_api_hash_here",
+        "TELEGRAM_SESSION_STRING": "your_session_string_here"
+      }
+    }
   }
-]
+}
 ```
 
-### Getting Direct Chats with Contacts
+Generate a session string without cloning the repo by sourcing this repository
+from GitHub explicitly:
 
-```python
-@mcp.tool()
-async def get_direct_chat_by_contact(contact_query: str) -> str:
-    """
-    Find a direct chat with a specific contact by name, username, or phone.
-    
-    Args:
-        contact_query: Name, username, or phone number to search for.
-    """
-    try:
-        # Fetch all contacts using the correct Telethon method
-        result = await client(functions.contacts.GetContactsRequest(hash=0))
-        contacts = result.users
-        found_contacts = []
-        for contact in contacts:
-            if not contact:
-                continue
-            name = f"{getattr(contact, 'first_name', '')} {getattr(contact, 'last_name', '')}".strip()
-            username = getattr(contact, 'username', '')
-            phone = getattr(contact, 'phone', '')
-            if (contact_query.lower() in name.lower() or 
-                (username and contact_query.lower() in username.lower()) or 
-                (phone and contact_query in phone)):
-                found_contacts.append(contact)
-        if not found_contacts:
-            return f"No contacts found matching '{contact_query}'."
-        # If we found contacts, look for direct chats with them
-        results = []
-        dialogs = await client.get_dialogs()
-        for contact in found_contacts:
-            contact_name = f"{getattr(contact, 'first_name', '')} {getattr(contact, 'last_name', '')}".strip()
-            for dialog in dialogs:
-                if isinstance(dialog.entity, User) and dialog.entity.id == contact.id:
-                    chat_info = f"Chat ID: {dialog.entity.id}, Contact: {contact_name}"
-                    if getattr(contact, 'username', ''):
-                        chat_info += f", Username: @{contact.username}"
-                    if dialog.unread_count:
-                        chat_info += f", Unread: {dialog.unread_count}"
-                    results.append(chat_info)
-                    break
-        
-        if not results:
-            return f"Found contacts matching '{contact_query}', but no direct chats with them."
-        
-        return "\n".join(results)
-    except Exception as e:
-        return f"Error searching for direct chat: {e}"
+```bash
+uvx --from "git+https://github.com/chigwell/telegram-mcp.git@<pinned-release-tag-or-commit>" telegram-mcp-generate-session
 ```
 
-Example output:
+## Multi-Account Setup
+
+Use suffixed session variables to configure multiple Telegram accounts:
+
+```env
+TELEGRAM_API_ID=your_api_id_here
+TELEGRAM_API_HASH=your_api_hash_here
+TELEGRAM_SESSION_STRING_WORK=session_string_for_work
+TELEGRAM_SESSION_STRING_PERSONAL=session_string_for_personal
 ```
-Chat ID: 123456789, Contact: John Smith, Username: @johnsmith, Unread: 3
+
+Labels are lowercased and become the `account` parameter value in tools.
+
+- In single-account mode, `account` is optional.
+- In multi-account mode, write tools require `account`.
+- Read-only tools fan out to all accounts when `account` is omitted.
+
+Example prompts:
+
+- "List my accounts"
+- "Show unread messages from all accounts"
+- "Send this from my work account to @example"
+
+## Proxy Support
+
+Route Telegram traffic through a proxy by setting the `TELEGRAM_PROXY_*`
+environment variables. Supported types are `socks5`, `socks4`, `http`, and
+`mtproxy`.
+
+SOCKS and HTTP proxies require the optional `python-socks` package:
+
+```bash
+uv sync --extra proxy
+# or
+pip install python-socks
 ```
 
----
+Single-account configuration:
 
-## 🎮 Usage Examples
+```env
+TELEGRAM_PROXY_TYPE=socks5
+TELEGRAM_PROXY_HOST=127.0.0.1
+TELEGRAM_PROXY_PORT=1080
+TELEGRAM_PROXY_USERNAME=optional_user
+TELEGRAM_PROXY_PASSWORD=optional_pass
+TELEGRAM_PROXY_RDNS=true
+```
 
-- "Show my recent chats"
-- "Send 'Hello world' to chat 123456789"
-- "Add contact with phone +1234567890, name John Doe"
-- "Create a group 'Project Team' with users 111, 222, 333"
-- "Download the media from message 42 in chat 123456789"
-- "Mute notifications for chat 123456789"
-- "Promote user 111 to admin in group 123456789"
-- "Search for public channels about 'news'"
-- "Join the Telegram group with invite link https://t.me/+AbCdEfGhIjK"
-- "Send a sticker to my Saved Messages"
-- "Get all my sticker sets"
+MTProxy:
 
-You can use these tools via natural language in Claude, Cursor, or any MCP-compatible client.
+```env
+TELEGRAM_PROXY_TYPE=mtproxy
+TELEGRAM_PROXY_HOST=mtproxy.example
+TELEGRAM_PROXY_PORT=443
+TELEGRAM_PROXY_SECRET=ee0123456789abcdef...
+```
 
----
+Per-account overrides use the same `_<LABEL>` suffix as session variables and
+take precedence over the unsuffixed defaults:
 
-## 🧠 Error Handling & Robustness
+```env
+TELEGRAM_PROXY_TYPE=socks5
+TELEGRAM_PROXY_HOST=127.0.0.1
+TELEGRAM_PROXY_PORT=1080
 
-This implementation includes comprehensive error handling:
+TELEGRAM_PROXY_TYPE_WORK=http
+TELEGRAM_PROXY_HOST_WORK=proxy.work.example
+TELEGRAM_PROXY_PORT_WORK=3128
+```
 
-- **Session management**: Works with both file-based and string-based sessions
-- **Error reporting**: Detailed errors logged to `mcp_errors.log`
-- **Graceful degradation**: Multiple fallback approaches for critical functions
-- **User-friendly messages**: Clear, actionable error messages instead of technical errors
-- **Account type detection**: Functions that require bot accounts detect and notify when used with user accounts
-- **Invite link processing**: Handles various link formats and already-member cases
+Misconfigured proxy settings (unknown type, missing host/port, invalid port,
+missing MTProxy secret, or a missing `python-socks` package) cause the server
+to fail fast at startup with a clear error message instead of silently
+bypassing the proxy.
 
-The code is designed to be robust against common Telegram API issues and limitations.
+## File Path Security
 
----
+File-path tools are disabled until allowed roots are configured. This affects tools such as `send_file`, `download_media`, `upload_file`, `send_voice`, `send_sticker`, `set_profile_photo`, and `edit_chat_photo`.
 
-## 🛠️ Contribution Guide
+Allowed roots can come from:
 
-1. **Fork this repo:** [chigwell/telegram-mcp](https://github.com/chigwell/telegram-mcp)
-2. **Clone your fork:**
-   ```bash
-   git clone https://github.com/<your-github-username>/telegram-mcp.git
-   ```
-3. **Create a new branch:**
-   ```bash
-   git checkout -b my-feature
-   ```
-4. **Make your changes, add tests/docs if needed.**
-5. **Push and open a Pull Request** to [chigwell/telegram-mcp](https://github.com/chigwell/telegram-mcp) with a clear description.
-6. **Tag @chigwell or @l1v0n1** in your PR for review.
+- Server CLI arguments, used as a fallback.
+- MCP client Roots, when supported by the client.
 
----
+Security behavior:
 
-## 🔒 Security Considerations
-- **Never commit your `.env` or session string.**
-- The session string gives full access to your Telegram account—keep it safe!
-- All processing is local; no data is sent anywhere except Telegram's API.
-- Use `.env.example` as a template and keep your actual `.env` file private.
-- Test files are automatically excluded in `.gitignore`.
+- Client MCP Roots replace server CLI roots when available.
+- Empty client Roots are treated as deny-all.
+- Paths are resolved through real paths and must stay inside an allowed root.
+- Traversal, wildcard-like, shell-like, and null-byte path patterns are rejected.
+- Relative paths resolve under the first allowed root.
+- Downloads default to `<first_root>/downloads/`.
+- Size and extension limits are enforced for sensitive media tools.
 
----
+Run with allowed roots:
 
-## 🛠️ Troubleshooting
-- **Check logs** in your MCP client (Claude/Cursor) and the terminal for errors.
-- **Detailed error logs** can be found in `mcp_errors.log`.
-- **Interpreter errors?** Make sure your `.venv` is created and selected.
-- **Database lock?** Use session string authentication, not file-based sessions.
-- **iCloud/Dropbox issues?** Move your project to a local path without spaces if you see odd errors.
-- **Regenerate session string** if you change your Telegram password or see auth errors.
-- **Bot-only functions** will show clear messages when used with regular user accounts.
-- **Test script failures?** Check test configuration in `.env` for valid test accounts/groups.
+```bash
+uv run main.py /data/telegram /tmp/telegram-mcp
+```
 
----
+From an MCP client configuration, pass the same roots after `main.py`:
 
-## 📄 License
+```json
+{
+  "mcpServers": {
+    "telegram-mcp": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/full/path/to/telegram-mcp",
+        "run",
+        "main.py",
+        "/data/telegram",
+        "/tmp/telegram-mcp"
+      ],
+      "env": {
+        "TELEGRAM_API_ID": "your_api_id_here",
+        "TELEGRAM_API_HASH": "your_api_hash_here",
+        "TELEGRAM_SESSION_STRING": "your_session_string_here"
+      }
+    }
+  }
+}
+```
+
+## Docker
+
+Build the image:
+
+```bash
+docker build -t telegram-mcp:latest .
+```
+
+Run with Compose:
+
+```bash
+docker compose up --build
+```
+
+Run directly:
+
+```bash
+docker run -it --rm \
+  -e TELEGRAM_API_ID="YOUR_API_ID" \
+  -e TELEGRAM_API_HASH="YOUR_API_HASH" \
+  -e TELEGRAM_SESSION_STRING="YOUR_SESSION_STRING" \
+  telegram-mcp:latest
+```
+
+For multiple accounts, pass variables such as `TELEGRAM_SESSION_STRING_WORK` and `TELEGRAM_SESSION_STRING_PERSONAL`.
+
+## Development
+
+The implementation is split into a small compatibility entrypoint and modular package code:
+
+```text
+main.py                    # historical entrypoint and compatibility exports
+telegram_mcp/runtime.py    # shared MCP setup, account routing, validation, file safety
+telegram_mcp/runner.py     # application startup
+telegram_mcp/tools/        # tool modules grouped by domain
+sanitize.py                # output sanitization helpers
+tests/                     # pytest suite
+```
+
+Run tests:
+
+```bash
+uv run pytest
+```
+
+Run tests with coverage:
+
+```bash
+uv run pytest --cov --cov-report=term-missing --cov-report=xml
+```
+
+Coverage is configured in `pyproject.toml` with an 80% minimum gate for deterministic unit-testable core modules. GitHub Actions runs the same coverage command and uploads `coverage.xml`.
+
+Run formatting checks:
+
+```bash
+uv run black --check .
+uv run flake8 .
+```
+
+## Security Notes
+
+- Never commit `.env`, session strings, or `.session` files.
+- A Telegram session string grants access to the account it belongs to.
+- The `telegram-mcp` package name on PyPI is not controlled by this project.
+  Avoid PyPI-based `telegram-mcp` install commands unless ownership changes and
+  the package is verified.
+- This repository includes a best-effort startup guard that refuses installed
+  `telegram-mcp` distributions without a source checkout or direct git/file
+  install record. That guard cannot run when the unrelated PyPI package itself
+  is launched, so use clone-based or explicit git installs.
+- Prefer session strings over file sessions when running multiple server instances.
+- By default, Telegram API calls go directly from your machine/container to Telegram.
+  If `TELEGRAM_PROXY_*` is configured, Telegram traffic is routed through the
+  configured SOCKS/HTTP/MTProxy proxy instead.
+- User-generated Telegram content is sanitized before being returned to MCP clients.
+
+### Prompt Injection Protection
+
+Telegram messages, display names, chat titles, and button labels are untrusted content. The server mitigates prompt-injection risk with:
+
+- Structured JSON output for user-controlled data where practical.
+- `sanitize_user_content()`, `sanitize_name()`, and `sanitize_dict()` for control-character stripping, invisible-character stripping, and length limits.
+- MCP content annotations marking returned content as user audience data.
+- Tool descriptions that warn clients not to treat returned Telegram fields as model instructions.
+- No brittle keyword-based filtering.
+
+## Troubleshooting
+
+- **No Telegram session configured:** set `TELEGRAM_SESSION_STRING`, `TELEGRAM_SESSION_NAME`, or suffixed multi-account variants.
+- **Session is not authorized:** run `uv run session_string_generator.py` outside
+  the MCP server, use QR login when possible, then set `TELEGRAM_SESSION_STRING`
+  in `.env`. The MCP server does not perform interactive phone-code login over
+  stdio.
+- **Invalid API credentials:** verify `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` at [my.telegram.org/apps](https://my.telegram.org/apps).
+- **Database is locked:** prefer string sessions, or make sure no other process is using the same file session.
+- **File tools are disabled:** pass allowed roots or configure MCP Roots in your client.
+- **Path rejected:** ensure the path is inside an allowed root and does not use traversal or wildcard patterns.
+- **Auth errors after password changes:** regenerate your session string.
+- **Bot-only tool rejected:** regular user accounts cannot manage bot command settings.
+- **Need details:** check your MCP client logs, terminal output, and `mcp_errors.log`.
+
+## Contributing
+
+1. Fork and clone the repository.
+2. Install dependencies and git hooks:
+   - `uv sync`
+   - `uv run pre-commit install --hook-type pre-commit --hook-type pre-push`
+3. Create a focused branch.
+4. Add or update tests when behavior changes.
+5. Run checks locally:
+   - `uv run pre-commit run --all-files`
+   - `uv run pre-commit run --hook-stage pre-push --all-files`
+6. Open a pull request with a concise description.
+
+## License
 
 This project is licensed under the [Apache 2.0 License](LICENSE).
 
----
+## Acknowledgements
 
-## 🙏 Acknowledgements
 - [Telethon](https://github.com/LonamiWebs/Telethon)
 - [Model Context Protocol](https://modelcontextprotocol.io/)
 - [Claude](https://www.anthropic.com/) and [Cursor](https://cursor.so/)
-- [chigwell/telegram-mcp](https://github.com/chigwell/telegram-mcp) (upstream)
+- [chigwell/telegram-mcp](https://github.com/chigwell/telegram-mcp) upstream project
 
----
-
-**Maintained by [@chigwell](https://github.com/chigwell) and [@l1v0n1](https://github.com/l1v0n1). PRs welcome!**
+Maintained by [@chigwell](https://github.com/chigwell) and [@l1v0n1](https://github.com/l1v0n1). PRs welcome.
 
 ## Star History
 
