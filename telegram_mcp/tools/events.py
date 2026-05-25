@@ -74,9 +74,7 @@ def register_incoming_handlers() -> None:
         try:
             cl.add_event_handler(_on_new_incoming, _events.NewMessage(incoming=True))
         except Exception:
-            logging.getLogger("telegram_mcp").exception(
-                "failed to register incoming handler"
-            )
+            logging.getLogger("telegram_mcp").exception("failed to register incoming handler")
 
 
 @mcp.tool(
