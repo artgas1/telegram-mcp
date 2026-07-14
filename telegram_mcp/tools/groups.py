@@ -243,12 +243,14 @@ async def get_participants(
         cl = get_client(account)
         await ensure_connected(cl)
 
-        # Use iter_participants with offset to fetch only the needed slice,
-        # avoiding O(N) fetching on later pages.
+        # Telethon's iter_participants() has no server-side offset parameter
+        # (unlike iter_messages), so fetch up to the end of the requested page
+        # and slice the page out locally.
         offset = (page - 1) * page_size
         participants = []
-        async for participant in cl.iter_participants(chat_id, limit=page_size, offset=offset):
+        async for participant in cl.iter_participants(chat_id, limit=offset + page_size):
             participants.append(participant)
+        participants = participants[offset:]
 
         if not participants:
             return format_tool_result([])
