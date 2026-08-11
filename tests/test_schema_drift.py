@@ -1,4 +1,5 @@
 """Проверка: рассинхрон схемы отдаётся внятным сообщением, обычная ошибка — прежним."""
+
 from telegram_mcp.runtime import log_and_format_error
 from telethon.errors.common import TypeNotFoundError
 

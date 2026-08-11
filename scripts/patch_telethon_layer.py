@@ -104,7 +104,9 @@ def do_restore() -> int:
     tl_dir = telethon_tl_dir()
     backups = sorted(tl_dir.parent.glob("tl.orig-layer*.tar.gz"))
     if not backups:
-        raise SystemExit("бэкапа нет — откат через переустановку: uv sync --reinstall-package telethon")
+        raise SystemExit(
+            "бэкапа нет — откат через переустановку: uv sync --reinstall-package telethon"
+        )
     archive = backups[-1]
     for name in GENERATED:
         target = tl_dir / name
@@ -185,7 +187,9 @@ def do_patch() -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--check", action="store_true", help="показать текущий и целевой слой")
     g.add_argument("--restore", action="store_true", help="откатить из бэкапа")
