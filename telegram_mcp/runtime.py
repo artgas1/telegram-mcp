@@ -711,7 +711,29 @@ def log_and_format_error(
     if user_message:
         return user_message
 
+    # Рассинхрон схемы MTProto нельзя прятать за общим кодом: снаружи он
+    # неотличим от «такого пользователя/чата нет», и разбор уходит не туда.
+    # Telethon-релизы отстают от боевого слоя Telegram; когда сервер присылает
+    # объект с незнакомым конструктором, у клиента едет разбор всего буфера, и
+    # часть вызовов падает, пока соседние работают.
+    if _is_schema_drift(error):
+        return (
+            f"Схема MTProto разошлась с сервером: установленный Telethon не знает объект, "
+            f"который прислал Telegram ({error}). Это НЕ «нет такого пользователя/чата» — "
+            f"данные пришли, сломался их разбор. Починка: "
+            f"uv run python scripts/patch_telethon_layer.py (code: {error_code})."
+        )
+
     return f"An error occurred (code: {error_code}). Check mcp_errors.log for details."
+
+
+def _is_schema_drift(error: Exception) -> bool:
+    """TypeNotFoundError = установленная схема TL старше того, что отдаёт сервер."""
+    try:
+        from telethon.errors.common import TypeNotFoundError
+    except Exception:  # telethon отсутствует или переехал — не наша забота здесь
+        return False
+    return isinstance(error, TypeNotFoundError)
 
 
 def validate_id(*param_names_to_validate):
