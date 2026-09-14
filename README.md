@@ -44,8 +44,8 @@ Message sent successfully:
 The server currently includes 80+ MCP tools grouped into these areas:
 
 - **Accounts:** list configured accounts and route tool calls by account label.
-- **Chats and groups:** list chats, inspect metadata, create groups/channels, join or leave chats, invite users, manage admins, bans, default permissions, slow mode, topics, invite links, common chats, read receipts, and message links.
-- **Messages:** send, schedule, edit, delete, forward, pin, unpin, mark read, reply, search, inspect context, create polls, manage reactions, inspect inline buttons, and press inline callbacks. `send_message`, `reply_to_message`, and `edit_message` support classic formatting (`parse_mode='md'`/`'html'`) and server-side rich formatting (`parse_mode='rich'`/`'rich_markdown'`/`'rich_html'` — full Markdown/HTML with tables, headings, formulas, and collapsible sections). Rich modes require Telegram Premium on the account; Premium is re-checked on every call, and without it nothing is sent — the tool returns a structured `telegram_premium_required` result so the agent can reformat with classic modes and retry.
+- **Chats and groups:** list chats, inspect metadata, create groups/channels, join or leave chats, invite or remove users, manage admins, bans, default permissions, slow mode, topics, invite links, common chats, read receipts, and message links.
+- **Messages:** send, schedule, edit, delete, forward, pin, unpin, mark read, reply, search, inspect context, create polls, manage reactions, inspect inline buttons, and press inline callbacks. `send_message`, `reply_to_message`, and `edit_message` support classic formatting (`parse_mode='md'`/`'html'`) and server-side rich formatting (`parse_mode='rich'`/`'rich_markdown'`/`'rich_html'` — full Markdown/HTML with tables, headings, formulas, and collapsible sections). Rich modes require Telegram Premium on the account; Premium is re-checked on every call, and without it nothing is sent — the tool returns a structured `telegram_premium_required` result so the agent can reformat with classic modes and retry. `send_message`, `reply_to_message`, and `edit_message` also accept `format_date` to render a date as a tappable chip.
 - **Contacts:** list, search, add, delete, block, unblock, import, export, inspect direct chats, find recent contact interactions, and remember contacts by the names you actually use (see below).
 
 ### Remembered contacts
@@ -57,12 +57,65 @@ The server currently includes 80+ MCP tools grouped into these areas:
 When a reference is unknown, resembles one contact, matches several, or points at a contact that no longer resolves, tools send nothing and return a structured instruction telling the agent exactly what to ask you, to save the answer with `set_contact_alias`, and to retry once. `list_contact_aliases` shows one row per person with all their aliases (use it to spot a wrong memory), `delete_contact_alias` forgets one, and repointing an alias at someone else requires `replace=True`. The save path itself refuses a target it would have to guess at: contacts are saved by @username, phone, numeric ID, or an alias already confirmed for them.
 
 Aliases live in `${XDG_STATE_HOME:-~/.local/state}/telegram-mcp/aliases.json` (owner-only, written atomically); `TELEGRAM_ALIASES_FILE` overrides the path, and a pre-existing `aliases.json` next to the code is still read as a fallback.
-- **Media:** send files, download media, upload files, send voice notes, stickers, GIFs, and inspect message media.
+- **Media:** send files, download media, upload files, send voice notes, stickers, GIFs, inspect message media, and transcribe voice messages/video notes (see below).
+
+### Voice transcription
+
+`transcribe_voice(chat_id, message_id, engine=None)` turns a voice message or video note into text. Two engines are available:
+
+- `groq` (default): uploads the recording to Groq's hosted `whisper-large-v3-turbo`. Leaves the server and costs a download+upload per call, but doesn't drop the recording's last few words the way native transcription does. Requires `GROQ_API_KEY`. Groq caps the size of a single upload, so a recording above `TELEGRAM_TRANSCRIBE_GROQ_MAX_MB` (default 25, the free-tier limit) is refused locally with a `too_large` error naming its size instead of being downloaded and rejected by the API. Raise the limit if your Groq tier allows bigger files, or transcribe that message with `engine='telegram'`, which has no such cap.
+- `telegram`: native Telegram Premium transcription (`messages.TranscribeAudioRequest`). Free and never leaves Telegram, but empirically drops the last speech segment in roughly 2 of 3 recordings and requires Telegram Premium on the account. Long recordings come back `pending` and are polled automatically.
+
+The engine is chosen per call via the `engine` argument, or otherwise defaults to `TELEGRAM_TRANSCRIBE_ENGINE` (`groq` or `telegram`). Results are cached by `(chat_id, message_id, engine)` in a local SQLite file so repeat reads and repeat listings never re-transcribe the same message. Concurrent requests for the same uncached recording are collapsed too: the second one waits for the first and returns its transcript, so a burst of callers costs one paid call, not one per caller. Every transcript is returned with a `note` marking it as a machine transcript, not a verbatim quote — treat it as a paraphrase, not exact wording.
+
+`get_history`, `get_messages`, and `list_messages` fill in already-cached transcripts for voice messages instead of leaving the text empty, controlled by `TELEGRAM_TRANSCRIBE`:
+
+- `off`: transcription is disabled at runtime. The `transcribe_voice` tool stays registered and returns `{"transcribed": false, "reason": "transcription_disabled"}` instead of transcribing, and listings never show transcripts. Use `TELEGRAM_EXPOSED_TOOLS` to hide the tool itself.
+- `on-demand` (default): listings show cached transcripts but never spend an API call fetching a new one.
+- `auto`: listings also prefetch missing transcripts, bounded per call by `TELEGRAM_TRANSCRIBE_MAX_VOICES`/`TELEGRAM_TRANSCRIBE_MAX_SECONDS` (Groq isn't free, so this prefetch is budgeted rather than unbounded).
+
+The cache lives in `TELEGRAM_TRANSCRIPT_CACHE_DIR` (default `data/transcripts`), written as a 700 directory / 600 file since it holds personal-chat text in plaintext — see [Docker](#docker) for why this needs its own volume mount in a container.
 - **Profile and privacy:** get your own account info, update profile fields, set or delete profile photos, inspect privacy settings, get user info/photos/status, and manage bot commands.
 - **Folders and drafts:** list, create, update, reorder, and delete Telegram folders; save, list, and clear drafts.
-- **Events:** wait for incoming messages with debounce (`wait_for_new_message`, `wait_for_settled_message`), or enable the opt-in incoming event feed for callback-style delivery (see below).
+- **Events:** wait for incoming messages with debounce (`wait_for_new_message`, `wait_for_settled_message`), optionally for one chat only via `chat_id` — without it any unrelated conversation wakes the wait — or enable the opt-in incoming event feed for callback-style delivery (see below).
 
 All tool results that include Telegram user-controlled content are sanitized and, where practical, returned as structured JSON.
+
+### Reusing custom emoji
+
+`get_history`, `list_messages`, `search_messages`, `search_global`,
+`get_message_context` (including `replied_message`), `get_pinned_messages`, and
+`get_drafts` include `custom_emojis` when the message contains custom emoji.
+`get_messages` and `get_scheduled_messages` include the same metadata as a JSON
+list in their text output. Ordinary messages keep their existing output.
+
+```json
+{"text": "🍷 News", "custom_emojis": [{"emoji": "🍷", "id": "5368324170671202286"}]}
+```
+
+Each entry contains the fallback emoji and its Telegram document ID as a string.
+Repeated IDs appear once per message; different IDs remain separate even when
+their fallback emoji looks identical. This is a list of reusable emoji variants,
+not a map of their positions or a copy of all message formatting. Extraction uses
+the original Telegram entities, including `TextCustomEmoji` nodes in block-format
+`rich_message` content, and makes no additional API requests. Emoji
+joiners and flag tag characters are preserved in the fallback text.
+
+To reuse an entry, set `parse_mode="html"` in `send_message`, `reply_to_message`,
+or `edit_message`, and insert `<tg-emoji emoji-id="ID">EMOJI</tg-emoji>` using its
+`id` and `emoji`. HTML-escape the fallback and other literal text. For example,
+the entry above becomes `<tg-emoji emoji-id="5368324170671202286">🍷</tg-emoji>`.
+Telegram's account restrictions still apply to sending custom emoji.
+
+### Tappable dates and times
+
+Passing `format_date` to `send_message`, `reply_to_message`, or `edit_message`
+renders a tappable date/time chip — the same entity Telegram's apps attach when
+you type a recognizable date. Give the date text exactly as it appears in the
+message: `'13/09'`, `'13/09/2026'`, or `'13/09 17:00'`. The chip opens
+copy-date / add-to-calendar / reminder actions. Plain-text messages only —
+omit `parse_mode`. For example, `send_message(chat_id, "Lunch 13/09 13:00",
+format_date="13/09 13:00")` sends a message whose date opens that menu.
 
 ### Incoming Event Feed (callback mode, Claude Code only)
 
@@ -160,6 +213,32 @@ reduced Telegram account permission. The Telegram session string still has its
 normal authority inside the server process; read-only mode only prevents
 non-read-only tools from being registered and exposed through MCP. Accepted
 values are `all` (the default), `read-only`, and `read-only+<tool>,<tool>`.
+
+Voice transcription (see [Voice transcription](#voice-transcription) above) is
+off by default in the sense that no transcript is ever fetched unless you ask
+for one — `transcribe_voice` is always available, and listings only pick up
+already-cached transcripts. Enable prefetching or pick an engine explicitly:
+
+```env
+TELEGRAM_TRANSCRIBE=on-demand       # off / on-demand (default) / auto
+TELEGRAM_TRANSCRIBE_ENGINE=groq     # groq (default) or telegram
+GROQ_API_KEY=your_groq_api_key_here # required whenever engine=groq is used
+```
+
+`engine=groq` requires `GROQ_API_KEY`; `engine=telegram` requires Telegram
+Premium on the account. `TELEGRAM_TRANSCRIBE_MAX_VOICES` (default 5) and
+`TELEGRAM_TRANSCRIBE_MAX_SECONDS` (default 300) bound how much `auto` mode
+prefetches per listing call; `TELEGRAM_TRANSCRIPT_CACHE_DIR` (default
+`data/transcripts`) sets where the SQLite cache is written; `TELEGRAM_TRANSCRIBE_GROQ_MAX_MB`
+(default 25) is the largest recording the groq engine will upload.
+
+Telegram rate limits (`FloodWaitError`) are surfaced transparently to MCP clients and LLM agents with the exact wait duration and an explicit instruction not to retry immediately.
+
+Use `TELEGRAM_FLOOD_SLEEP_THRESHOLD` to configure Telethon's internal silent-sleep threshold (default: 60 seconds). Set to `0` to disable silent sleeping and let the agent manage all backoff pacing:
+
+```env
+TELEGRAM_FLOOD_SLEEP_THRESHOLD=60   # Max seconds Telethon sleeps silently on FloodWait (default 60)
+```
 
 Run the server locally:
 
@@ -329,7 +408,31 @@ Generate extra sessions with `uv run session_string_generator.py`. The pool
 takes precedence over `TELEGRAM_SESSION_STRING` for the default account. As an
 extra safety net, a transient `AuthKeyDuplicatedError` at connect time (e.g.
 during a VPN reconnect) is retried with backoff before the server gives up.
+
+Size the pool to the number of clients you actually run concurrently. If every
+slot is already claimed, the server refuses to start with an explicit error
+rather than reusing a session another client holds — reuse would make Telegram
+permanently invalidate that session for both clients.
 - "Send this from my work account to @example"
+
+### Sharing one session from one host
+
+Before connecting, every server process takes a per-session lock (see the
+`AuthKeyDuplicatedError` entry under Troubleshooting). By default it is
+exclusive: a second instance for the same session waits briefly for the first
+to exit and otherwise refuses to start. That lock can only see processes on the
+same host, and Telegram's rule is about IPs, not processes: instances on one
+host only collide when they reach Telegram from different IPs (dual-stack or
+split-tunnel VPN hosts). When they all share one egress IP — a laptop running
+several MCP clients — you can let them share the session instead of pooling:
+
+```env
+TELEGRAM_SESSION_LOCK=shared
+```
+
+Shared instances coexist with each other but never overlap an exclusive one
+(except on Windows, where a shared instance takes no lock). If you are not sure
+every client egresses from the same IP, use the pool.
 
 ## Device Identity
 
@@ -493,6 +596,16 @@ The bundled Compose file runs the same setup:
 docker compose up --build -d
 ```
 
+It also mounts `./transcript_cache` into the container at
+`/app/data/transcripts` so the voice-transcription SQLite cache (see
+[Voice transcription](#voice-transcription)) survives a rebuild instead of
+living in the container's writable layer. Create it once, owned by the
+container's `appuser` (uid 1000), before starting:
+
+```bash
+mkdir -p ./transcript_cache && chown 1000:1000 ./transcript_cache
+```
+
 ### One container per client (stdio)
 
 Alternatively, an MCP client can spawn a dedicated container itself:
@@ -587,6 +700,7 @@ Telegram messages, display names, chat titles, and button labels are untrusted c
   interactive phone-code login over stdio.
 - **Invalid API credentials:** verify `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` at [my.telegram.org/apps](https://my.telegram.org/apps).
 - **Database is locked:** prefer string sessions, or make sure no other process is using the same file session.
+- **`AuthKeyDuplicatedError` / "Another telegram-mcp process is already connected with this session":** two processes tried to connect the same Telegram session at once (e.g. an MCP client restarted the connector before the old process exited), which Telegram rejects and can invalidate the session for both. The server now takes an exclusive lock per session before connecting; a second concurrent launch waits briefly (default 20s, override with `TELEGRAM_LOCK_GRACE_SECONDS`) for the first to release it and otherwise exits without ever calling `connect()`, instead of racing into a duplicate connection. Retry once only one instance is running — the refusal names the PID holding the lock. If several instances on this host are meant to share one session (all reaching Telegram from the same IP), set `TELEGRAM_SESSION_LOCK=shared`; see [Sharing one session from one host](#sharing-one-session-from-one-host).
 - **File tools are disabled:** pass allowed roots or configure MCP Roots in your client.
 - **Path rejected:** ensure the path is inside an allowed root and does not use traversal or wildcard patterns.
 - **Auth errors after password changes:** regenerate your session string.
@@ -621,7 +735,7 @@ Maintained by [@chigwell](https://github.com/chigwell) and [@l1v0n1](https://git
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=chigwell/telegram-mcp&type=Date)](https://www.star-history.com/#chigwell/telegram-mcp&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=chigwell/telegram-mcp&type=Date)](https://star-history.dera.page/#chigwell/telegram-mcp&Date)
 
 ## Contributors
 
