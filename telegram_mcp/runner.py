@@ -7,7 +7,15 @@ try:
 except UnsafeInstallationError as exc:
     raise SystemExit(str(exc)) from None
 
-from telethon.errors import AuthKeyDuplicatedError
+import sys
+from telethon.errors import AuthKeyDuplicatedError, BotMethodInvalidError
+
+# Ensure sys.stderr is reconfigured for UTF-8 on Windows where possible
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
+    except Exception:
+        pass
 
 from telegram_mcp import runtime as _runtime
 from telegram_mcp import transcription as _transcription
@@ -55,6 +63,48 @@ def _session_lock_shared() -> bool:
     return raw == "shared"
 
 
+def _normalize_username(value) -> str:
+    return (value or "").strip().lstrip("@").casefold()
+
+
+def _expected_username(label: str) -> str:
+    """TELEGRAM_EXPECTED_USERNAME_<LABEL>, else TELEGRAM_EXPECTED_USERNAME; "" if unset."""
+    raw = os.getenv(f"TELEGRAM_EXPECTED_USERNAME_{label.upper()}") or os.getenv(
+        "TELEGRAM_EXPECTED_USERNAME"
+    )
+    return _normalize_username(raw)
+
+
+async def _verify_expected_username(label: str, client) -> None:
+    """Refuse to serve a session logged in to a different account."""
+    expected = _expected_username(label)
+    if not expected:
+        return
+
+    me = await client.get_me()
+    usernames = {_normalize_username(getattr(me, "username", None))}
+    for entry in getattr(me, "usernames", None) or []:
+        if getattr(entry, "active", False):
+            usernames.add(_normalize_username(getattr(entry, "username", None)))
+    usernames.discard("")
+
+    if expected in usernames:
+        return
+
+    try:
+        await client.disconnect()
+    except Exception:
+        pass
+    raise RuntimeError(
+        f"Telegram client '{label}' is logged in to a different account than "
+        f"TELEGRAM_EXPECTED_USERNAME_{label.upper()} / TELEGRAM_EXPECTED_USERNAME expects."
+    )
+
+
+class _NotAuthorized(RuntimeError):
+    """The session connects but was never logged in."""
+
+
 async def _connect_authorized_client(label, client) -> None:
     # First, prevent our own duplicate-spawn case outright: a per-session lock
     # means a second instance of this server never even attempts to connect
@@ -98,9 +148,10 @@ async def _connect_authorized_client(label, client) -> None:
             await asyncio.sleep(delay)
 
     if await client.is_user_authorized():
+        await _verify_expected_username(label, client)
         return
 
-    raise RuntimeError(
+    raise _NotAuthorized(
         f"Telegram client '{label}' is not authorized. Interactive phone login "
         "is disabled for the MCP server because it runs over stdio. Generate a "
         "session string with `uv run session_string_generator.py`, then set "
@@ -109,20 +160,56 @@ async def _connect_authorized_client(label, client) -> None:
     )
 
 
-def _configure_transport_security() -> None:
-    """Wire MCP_ALLOWED_HOSTS/MCP_ALLOWED_ORIGINS into FastMCP's DNS-rebinding
-    protection, e.g. when the server sits behind a reverse proxy on a public
-    domain instead of only being reached via 127.0.0.1/localhost.
-    """
-    raw_hosts = os.getenv("MCP_ALLOWED_HOSTS", "")
-    allowed_hosts = [h.strip() for h in raw_hosts.split(",") if h.strip()]
-    if not allowed_hosts:
-        return
+async def _connect_or_skip(label, client) -> None:
+    """Connect one account; drop an optional one that was never logged in."""
+    try:
+        await _connect_authorized_client(label, client)
+    except _NotAuthorized:
+        if label not in _runtime.OPTIONAL_ACCOUNTS:
+            raise
+        lock = _session_locks.pop(label, None)
+        if lock is not None:
+            lock.release()
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        clients.pop(label, None)
+        print(
+            f"Skipping account '{label}': TELEGRAM_SESSION_NAME names a session that is not "
+            "logged in, and labelled accounts are configured. Unset TELEGRAM_SESSION_NAME "
+            "or log that session in to use it as the default account.",
+            file=sys.stderr,
+        )
 
+
+_LOCAL_ALLOWED_HOSTS = ("127.0.0.1:*", "localhost:*", "[::1]:*")
+_LOCAL_ALLOWED_ORIGINS = ("http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*")
+
+
+def _configure_transport_security() -> None:
+    """Always enable FastMCP's Host/Origin validation for the HTTP transports.
+
+    Without it any web page open in the user's browser could POST tool calls
+    (send, delete, forward...) to the local server: cross-origin request
+    forgery, or DNS rebinding through a hostile domain. The protection is set
+    here explicitly rather than left to FastMCP's constructor, which only turns
+    it on for the host the instance was built with, not for MCP_HOST.
+
+    By default only 127.0.0.1/localhost/[::1] Host headers and browser origins
+    are accepted. MCP_ALLOWED_HOSTS/MCP_ALLOWED_ORIGINS replace those lists,
+    e.g. when the server sits behind a reverse proxy on a public domain.
+    """
     from mcp.server.transport_security import TransportSecuritySettings
 
+    raw_hosts = os.getenv("MCP_ALLOWED_HOSTS", "")
+    allowed_hosts = [h.strip() for h in raw_hosts.split(",") if h.strip()]
     raw_origins = os.getenv("MCP_ALLOWED_ORIGINS", "")
     allowed_origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
+    if not allowed_hosts:
+        allowed_hosts = list(_LOCAL_ALLOWED_HOSTS)
+        if not allowed_origins:
+            allowed_origins = list(_LOCAL_ALLOWED_ORIGINS)
 
     mcp.settings.transport_security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
@@ -158,9 +245,8 @@ async def _main() -> None:
     try:
         labels = ", ".join(clients.keys())
         print(f"Starting {len(clients)} Telegram client(s) ({labels})...", file=sys.stderr)
-        await asyncio.gather(
-            *(_connect_authorized_client(label, cl) for label, cl in clients.items())
-        )
+        await asyncio.gather(*(_connect_or_skip(label, cl) for label, cl in list(clients.items())))
+        labels = ", ".join(clients.keys())
 
         # Warm entity caches — StringSession has no persistent cache,
         # so fetch all dialogs once per client to populate them.
@@ -170,19 +256,53 @@ async def _main() -> None:
         print("Warming entity caches (background)...", file=sys.stderr)
 
         async def _warm_caches() -> None:
+            async def _warm_client(label: str, cl: TelegramClient) -> None:
+                try:
+                    await cl.get_dialogs()
+                except BotMethodInvalidError:
+                    print(
+                        f"Skipping entity cache pre-warm for bot client "
+                        f"'{label}' (dialogs restricted for bots).",
+                        file=sys.stderr,
+                    )
+                except Exception as exc:
+                    print(f"Entity cache warm failed for '{label}': {exc}", file=sys.stderr)
+
             try:
-                await asyncio.gather(*(cl.get_dialogs() for cl in clients.values()))
+                await asyncio.gather(*(_warm_client(label, cl) for label, cl in clients.items()))
                 print("Entity caches warmed.", file=sys.stderr)
             except Exception as warm_exc:
                 print(f"Entity cache warm failed: {warm_exc}", file=sys.stderr)
 
-        warm_task = asyncio.create_task(_warm_caches())
+        asyncio.create_task(_warm_caches())
 
         transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
-        print(
-            f"Telegram client(s) started ({labels}). Running MCP server ({transport})...",
-            file=sys.stderr,
-        )
+
+        # Validate transport mode
+        VALID_TRANSPORTS = ("stdio", "http", "sse")
+        if transport not in VALID_TRANSPORTS:
+            accepted = ", ".join(VALID_TRANSPORTS)
+            print(
+                f"Invalid MCP_TRANSPORT '{transport}'. Expected one of: {accepted}.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        # Startup log with host:port for HTTP/SSE transports
+        if transport in ("http", "sse"):
+            host = os.getenv("MCP_HOST", "127.0.0.1")
+            port = os.getenv("MCP_PORT", "8765")
+            print(
+                f"Telegram client(s) started ({labels}). Running MCP server "
+                f"({transport}) on {host}:{port}...",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"Telegram client(s) started ({labels}). Running MCP server ({transport})...",
+                file=sys.stderr,
+            )
+
         await _serve(transport)
     except Exception as e:
         print(f"Error starting client: {e}", file=sys.stderr)
@@ -218,7 +338,38 @@ async def _main() -> None:
 
 def main() -> None:
     _configure_allowed_roots_from_cli(sys.argv[1:])
-    _runtime._apply_exposed_tools_mode()
+    # Apply CLI transport/host/port overrides to environment (runtime sets globals)
+    transport = _runtime._CLI_TRANSPORT or "stdio"
+    host = _runtime._CLI_HOST
+    port = _runtime._CLI_PORT
+
+    if transport != "stdio":
+        os.environ["MCP_TRANSPORT"] = transport
+    if host:
+        os.environ["MCP_HOST"] = host
+    if port is not None:
+        os.environ["MCP_PORT"] = str(port)
+    # Before _apply_exposed_tools_mode(): that prunes non-exposed tools from
+    # the tool manager, and the extension overrides validate tool names
+    # against that same manager. Narrowing send_file's extensions while
+    # send_file is not exposed is a valid configuration, so the name check
+    # has to see the full tool set.
+    _runtime._apply_file_extension_overrides()
+    hidden, excluded = _runtime._apply_exposed_tools_mode()
+    if hidden:
+        # These names are the menu for the "+" allowlist; without this line the
+        # only way to find them is reading the tool annotations in the source.
+        print(
+            f"TELEGRAM_EXPOSED_TOOLS hides {len(hidden)} tool(s); list any of them "
+            f"after '+' to expose it: {', '.join(sorted(hidden))}",
+            file=sys.stderr,
+        )
+    if excluded:
+        print(
+            f"TELEGRAM_EXPOSED_TOOLS excludes {len(excluded)} tool(s) listed "
+            f"after '-': {', '.join(sorted(excluded))}",
+            file=sys.stderr,
+        )
     _transcription.validate_transcription_config()
     _session_lock_shared()  # fail loudly at startup on a bad toggle
     asyncio.run(_main())
