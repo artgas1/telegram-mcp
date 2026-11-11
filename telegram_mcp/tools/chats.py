@@ -682,6 +682,7 @@ async def get_chat(chat_id: Union[int, str], account: str = None) -> str:
                     "sender": sender_name,
                     "date": last_msg.date,
                     "text": sanitize_user_content(last_msg.message),
+                    **get_link_metadata(last_msg),
                 }
         except Exception:
             logger.warning("Could not get requested dialog metadata")

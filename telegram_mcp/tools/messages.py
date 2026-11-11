@@ -81,17 +81,12 @@ def _inline_button_texts(msg):
     return out
 
 
-def _link_urls(msg):
-    """Explicit URLs from entities (links hidden behind text), [] if none."""
-    out = []
-    try:
-        for e in getattr(msg, "entities", None) or []:
-            u = getattr(e, "url", None)
-            if u:
-                out.append(u)
-    except Exception:
-        pass
-    return out
+def _links_line_part(msg) -> str:
+    """'links: [...]' fragment for one-line message renderings, '' if none."""
+    links = get_link_metadata(msg)
+    if not links:
+        return ""
+    return "links: " + json.dumps(links["links"], ensure_ascii=False)
 
 
 def _rich_custom_emojis(node):
@@ -193,6 +188,7 @@ def message_to_dict(msg, chat_id: Optional[int] = None) -> dict:
     if rich:
         d["rich"] = True  # text rebuilt from page blocks, not a verbatim .message
     d.update(get_custom_emoji_metadata(msg))
+    d.update(get_link_metadata(msg))
 
     media_label = get_media_label(msg)
     if media_label:
@@ -313,10 +309,6 @@ def message_to_dict(msg, chat_id: Optional[int] = None) -> dict:
     if buttons:
         d["buttons"] = buttons
 
-    urls = _link_urls(msg)
-    if urls:
-        d["link_urls"] = urls
-
     action = getattr(msg, "action", None)
     if action is not None:
         d["action"] = type(action).__name__  # service message (joined/pinned/…)
@@ -381,6 +373,9 @@ def format_message_line(msg, chat_id: Optional[int] = None) -> str:
         parts.append(
             f"custom_emojis: {json.dumps(custom_emojis['custom_emojis'], ensure_ascii=False)}"
         )
+    links_part = _links_line_part(msg)
+    if links_part:
+        parts.append(links_part)
 
     raw = sanitize_user_content(msg.message) if getattr(msg, "message", None) else ""
     if not raw:
@@ -404,6 +399,8 @@ async def get_messages(
 ) -> str:
     """
     Get paginated messages from a specific chat.
+    Lines include links when present: {text, url} for hidden text links and
+    explicit URLs, {text, user_id} for mentions of users without a username.
     Lines include custom_emojis when present: unique {emoji, id} pairs, with IDs
     as strings. Reuse them with send_message/reply_to_message and parse_mode='html'.
     Args:
@@ -659,6 +656,8 @@ async def send_scheduled_message(
 async def get_scheduled_messages(chat_id: Union[int, str], account: str = None) -> str:
     """
     List all scheduled (pending) messages in a chat.
+    Lines include links when present: {text, url} for hidden text links and
+    explicit URLs, {text, user_id} for mentions of users without a username.
     Lines include custom_emojis when present: unique {emoji, id} pairs for reuse
     with parse_mode='html' and <tg-emoji emoji-id="ID">EMOJI</tg-emoji>.
     Args:
@@ -685,6 +684,9 @@ async def get_scheduled_messages(chat_id: Union[int, str], account: str = None) 
             custom_emojis = get_custom_emoji_metadata(msg)
             if custom_emojis:
                 line += f" | custom_emojis: {json.dumps(custom_emojis['custom_emojis'], ensure_ascii=False)}"
+            links_part = _links_line_part(msg)
+            if links_part:
+                line += f" | {links_part}"
             lines.append(line)
         return "\n".join(lines)
     except telethon.errors.rpcerrorlist.ChatAdminRequiredError as e:
@@ -982,6 +984,8 @@ async def list_messages(
     """
     Retrieve messages with optional filters.
 
+    Records include links when present: {text, url} for hidden text links and
+    explicit URLs, {text, user_id} for mentions of users without a username.
     Records include custom_emojis when present: unique {emoji, id} pairs for reuse
     with parse_mode='html' and <tg-emoji emoji-id="ID">EMOJI</tg-emoji>.
 
@@ -1093,6 +1097,7 @@ async def list_messages(
                 "date": msg.date,
                 "text": sanitize_user_content(msg.message),
                 **get_custom_emoji_metadata(msg),
+                **get_link_metadata(msg),
             }
             # Upstream bug: this hand-built record never called get_media_label,
             # so a voice/photo/etc. with no caption was indistinguishable from
@@ -1282,6 +1287,8 @@ async def get_message_context(
     """
     Retrieve context around a specific message.
 
+    Messages and replied_message include links when present: {text, url} for
+    hidden text links and explicit URLs, {text, user_id} for username-less mentions.
     Messages and replied_message include custom_emojis when present: unique
     {emoji, id} pairs for reuse with parse_mode='html' and
     <tg-emoji emoji-id="ID">EMOJI</tg-emoji>.
@@ -1322,6 +1329,7 @@ async def get_message_context(
                 "is_target": msg.id == message_id,
                 "text": sanitize_user_content(msg.message),
                 **get_custom_emoji_metadata(msg),
+                **get_link_metadata(msg),
             }
             if getattr(msg, "sender_id", None):
                 record["sender_id"] = msg.sender_id
@@ -1345,6 +1353,7 @@ async def get_message_context(
                             "sender": get_sender_name(replied_msg),
                             "text": sanitize_user_content(replied_msg.message),
                             **get_custom_emoji_metadata(replied_msg),
+                            **get_link_metadata(replied_msg),
                         }
                         if getattr(replied_msg, "sender_id", None):
                             replied_record["sender_id"] = replied_msg.sender_id
@@ -1934,6 +1943,8 @@ async def search_messages(
     """
     Search for messages in a chat by text.
 
+    Records include links when present: {text, url} for hidden text links and
+    explicit URLs, {text, user_id} for mentions of users without a username.
     Records include custom_emojis when present: unique {emoji, id} pairs for reuse
     with parse_mode='html' and <tg-emoji emoji-id="ID">EMOJI</tg-emoji>.
 
@@ -1952,6 +1963,7 @@ async def search_messages(
                 "date": msg.date,
                 "text": sanitize_user_content(msg.message),
                 **get_custom_emoji_metadata(msg),
+                **get_link_metadata(msg),
             }
             if msg.reply_to and msg.reply_to.reply_to_msg_id:
                 record["reply_to"] = msg.reply_to.reply_to_msg_id
@@ -1980,6 +1992,8 @@ async def search_global(
     """
     Search for messages across all public chats and channels by text content.
 
+    Records include links when present: {text, url} for hidden text links and
+    explicit URLs, {text, user_id} for mentions of users without a username.
     Records include custom_emojis when present: unique {emoji, id} pairs for reuse
     with parse_mode='html' and <tg-emoji emoji-id="ID">EMOJI</tg-emoji>.
 
@@ -2009,6 +2023,7 @@ async def search_global(
                     "date": msg.date,
                     "text": sanitize_user_content(msg.message),
                     **get_custom_emoji_metadata(msg),
+                    **get_link_metadata(msg),
                 }
             )
 
@@ -2031,6 +2046,8 @@ async def get_history(
     """
     Get full chat history (up to limit).
 
+    Records include links when present: {text, url} for hidden text links and
+    explicit URLs, {text, user_id} for mentions of users without a username.
     Records include custom_emojis when present: unique {emoji, id} pairs for reuse
     with parse_mode='html' and <tg-emoji emoji-id="ID">EMOJI</tg-emoji>.
 
@@ -2071,6 +2088,8 @@ async def get_pinned_messages(chat_id: Union[int, str], account: str = None) -> 
     """
     Get all pinned messages in a chat.
 
+    Records include links when present: {text, url} for hidden text links and
+    explicit URLs, {text, user_id} for mentions of users without a username.
     Records include custom_emojis when present: unique {emoji, id} pairs for reuse
     with parse_mode='html' and <tg-emoji emoji-id="ID">EMOJI</tg-emoji>.
 
@@ -2102,6 +2121,7 @@ async def get_pinned_messages(chat_id: Union[int, str], account: str = None) -> 
                 "date": msg.date,
                 "text": sanitize_user_content(msg.message),
                 **get_custom_emoji_metadata(msg),
+                **get_link_metadata(msg),
             }
             if msg.reply_to and msg.reply_to.reply_to_msg_id:
                 record["reply_to"] = msg.reply_to.reply_to_msg_id
@@ -2398,6 +2418,8 @@ async def get_drafts(account: str = None) -> str:
     """
     Get all draft messages across all chats.
     Returns a list of drafts with their chat info and message content.
+    Drafts include links when present: {text, url} for hidden text links and
+    explicit URLs, {text, user_id} for mentions of users without a username.
     Drafts include custom_emojis when present: unique {emoji, id} pairs for reuse
     with parse_mode='html' and <tg-emoji emoji-id="ID">EMOJI</tg-emoji>.
 
@@ -2432,6 +2454,7 @@ async def get_drafts(account: str = None) -> str:
                         "peer_id": peer_id,
                         "message": sanitize_user_content(getattr(draft, "message", "")),
                         **get_custom_emoji_metadata(draft),
+                        **get_link_metadata(draft),
                         "date": (
                             draft.date.isoformat()
                             if hasattr(draft, "date") and draft.date
