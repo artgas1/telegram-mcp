@@ -50,6 +50,24 @@ def test_load_aliases_missing_or_corrupt_file(tmp_path):
     assert _ids(runtime.load_aliases()) == {"ok": 5}  # bad row skipped, good row kept
 
 
+def test_save_aliases_creates_missing_override_directory(monkeypatch, tmp_path):
+    nested = tmp_path / "missing" / "nested" / "aliases.json"
+    monkeypatch.setenv("TELEGRAM_ALIASES_FILE", str(nested))
+
+    runtime.save_aliases({"андрей": 12345})
+
+    assert runtime.load_aliases() == {"андрей": {"id": 12345, "name": None, "account": None}}
+
+
+def test_update_aliases_creates_missing_override_directory(monkeypatch, tmp_path):
+    nested = tmp_path / "missing" / "aliases.json"
+    monkeypatch.setenv("TELEGRAM_ALIASES_FILE", str(nested))
+
+    runtime.update_aliases(lambda aliases: aliases.setdefault("андрей", 12345))
+
+    assert runtime.load_aliases()["андрей"]["id"] == 12345
+
+
 def test_save_and_load_roundtrip_normalizes_keys():
     runtime.save_aliases({"Работа": -1001234567890})
 
@@ -226,7 +244,8 @@ def test_alias_file_is_owner_only_and_written_atomically():
     runtime.save_aliases({"андрей": 1})
     path = runtime.aliases_file_path()
 
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    if os.name != "nt":  # POSIX permissions only
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert not path.with_suffix(".tmp").exists()
 
 
@@ -277,6 +296,7 @@ def test_update_aliases_does_not_lose_a_concurrent_write():
     assert _ids(runtime.load_aliases()) == {"первый": 1, "второй": 2, "третий": 3}
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permissions only")
 def test_update_aliases_refuses_to_write_over_an_unreadable_file():
     path = runtime.aliases_file_path()
     runtime.save_aliases({"важный": 1})

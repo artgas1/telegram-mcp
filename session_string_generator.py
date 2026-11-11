@@ -32,6 +32,7 @@ from dotenv import load_dotenv
 from telethon import errors
 from telethon.sessions import StringSession
 from telethon.sync import TelegramClient
+from telegram_mcp.account_labels import canonical_account_label
 from telegram_mcp.client_identity import client_identity_kwargs
 from telegram_mcp.install_guard import UnsafeInstallationError, assert_safe_distribution
 
@@ -205,7 +206,8 @@ def main() -> None:
     print("This script will generate a session string for your Telegram account.")
     print("The generated session string can be added to your .env file.")
     print(
-        "\nYour credentials will NOT be stored on any server and are only used for local authentication.\n"
+        "\nYour credentials will NOT be stored on any server and are only "
+        "used for local authentication.\n"
     )
 
     try:
@@ -217,6 +219,9 @@ def main() -> None:
     except EOFError:
         # Non-interactive stdin (piped/scripted runs): fall back to the default label.
         label = ""
+    # The suggested env var must match what the migrator and the server read:
+    # `export TELEGRAM_SESSION_STRING_MY-WORK=...` is not valid shell syntax.
+    label = canonical_account_label(label)
 
     if args.qr:
         method = "1"
@@ -254,13 +259,16 @@ def main() -> None:
 
         try:
             choice = input(
-                "\nWould you like to automatically update your .env file with this session string? (y/N): "
+                "\nWould you like to automatically update your .env file "
+                "with this session string? (y/N): "
             )
         except EOFError:
             choice = "n"
         if choice.lower() == "y":
             try:
-                with open(".env", "r") as file:
+                # python-dotenv reads .env as UTF-8; the locale default
+                # (cp1252, cp1251, cp936 on Windows) can't decode it.
+                with open(".env", "r", encoding="utf-8") as file:
                     env_contents = file.readlines()
 
                 session_string_line_found = False
@@ -273,7 +281,7 @@ def main() -> None:
                 if not session_string_line_found:
                     env_contents.append(f"{env_var}={session_string}\n")
 
-                with open(".env", "w") as file:
+                with open(".env", "w", encoding="utf-8") as file:
                     file.writelines(env_contents)
 
                 print("\n.env file updated successfully!")

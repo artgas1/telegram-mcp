@@ -1,9 +1,9 @@
-"""Links hidden in message entities (text URLs, explicit URLs, name mentions)."""
+"""Links in message entities (text URLs, explicit URLs, name mentions) as `links`."""
 
 import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from telethon.tl import types
@@ -12,9 +12,9 @@ from telegram_mcp import runtime
 from telegram_mcp.tools import contacts, messages
 
 DATE = datetime(2026, 1, 1, tzinfo=timezone.utc)
-URL = "https://t.me/baza_support"
-LINK = {"text": "аккаунт Базы", "url": URL}
-TEXT = "По вопросам пиши в аккаунт Базы"
+URL = "https://t.me/example_support"
+LINK = {"text": "support account", "url": URL}
+TEXT = "Questions? Write to our support account today"
 
 
 def _utf16(text):
@@ -26,14 +26,14 @@ def _span(text, part):
     return _utf16(text[:start]), _utf16(part)
 
 
-def _text_url_message(text=TEXT, part="аккаунт Базы", url=URL, **kwargs):
-    return _message(text, [types.MessageEntityTextUrl(*_span(text, part), url)], **kwargs)
-
-
 def _message(text=TEXT, entities=None, **kwargs):
     return types.Message(
         id=1, peer_id=types.PeerUser(42), date=DATE, message=text, entities=entities, **kwargs
     )
+
+
+def _text_url_message(text=TEXT, part="support account", url=URL, **kwargs):
+    return _message(text, [types.MessageEntityTextUrl(*_span(text, part), url)], **kwargs)
 
 
 @pytest.mark.parametrize(
@@ -48,12 +48,9 @@ def _message(text=TEXT, entities=None, **kwargs):
 )
 def test_messages_without_links_have_no_metadata(msg):
     assert runtime.get_link_metadata(msg) == {}
-    assert "links" not in messages.message_to_dict(
-        msg if hasattr(msg, "id") else _message(entities=[])
-    )
 
 
-def test_text_url_is_exposed_with_its_visible_text():
+def test_text_url_is_paired_with_its_visible_text():
     assert runtime.get_link_metadata(_text_url_message()) == {"links": [LINK]}
 
 
@@ -81,18 +78,19 @@ def test_mention_name_entities_expose_user_id():
     }
 
 
-@pytest.mark.parametrize("prefix", ["", "🍷 ", "👩🏽‍💻 x ", "🇺🇳🇺🇳 ", "𝔘𝔫𝔦𝔠𝔬𝔡𝔢 ", "a​b "])
+@pytest.mark.parametrize(
+    "prefix", ["", "🍷 ", "👩🏽‍💻 x ", "🇺🇳🇺🇳 ", "𝔘𝔫𝔦𝔠𝔬𝔡𝔢 ", "a​b ", "Привет, "]
+)
 def test_utf16_offsets_after_astral_characters(prefix):
-    text = prefix + "пиши в аккаунт Базы, ок 🙂"
+    text = prefix + "write to our support account, ok 🙂"
     assert runtime.get_link_metadata(_text_url_message(text)) == {"links": [LINK]}
 
 
-def test_link_text_with_emoji_and_order_and_dedup():
+def test_order_is_kept_and_duplicates_are_dropped():
     text = "🔗 first 💬 second first"
-    first = _span(text, "first")
     entities = [
         types.MessageEntityBold(0, _utf16(text)),
-        types.MessageEntityTextUrl(*first, "https://a.example"),
+        types.MessageEntityTextUrl(*_span(text, "first"), "https://a.example"),
         types.MessageEntityTextUrl(*_span(text, "💬 second"), "https://b.example"),
         types.MessageEntityTextUrl(_utf16(text) - 5, 5, "https://a.example"),
     ]
@@ -114,8 +112,9 @@ def test_message_to_dict_and_line_include_links():
     msg = _text_url_message()
     d = messages.message_to_dict(msg)
     assert d["links"] == [LINK]
+    assert d["link_urls"] == [URL]  # unchanged, kept for compatibility
     assert d["text"] == TEXT
-    assert "link_urls" not in d
+    assert "links" not in messages.message_to_dict(_message(entities=[]))
     line = messages.format_message_line(msg)
     assert "links: " + json.dumps([LINK], ensure_ascii=False) in line
     assert "links:" not in messages.format_message_line(_message(entities=[]))
@@ -124,6 +123,8 @@ def test_message_to_dict_and_line_include_links():
 @pytest.fixture
 def client(monkeypatch):
     cl = AsyncMock()
+    cl._mb_entity_cache = MagicMock()
+    cl._mb_entity_cache.get.return_value = None
     monkeypatch.setattr(messages, "get_client", lambda account=None: cl)
     monkeypatch.setattr(messages, "resolve_entity", AsyncMock(return_value=types.User(id=42)))
     monkeypatch.setattr(messages, "ensure_connected", AsyncMock())
@@ -138,8 +139,8 @@ def client(monkeypatch):
     [
         (messages.get_history, {"chat_id": 42}),
         (messages.list_messages, {"chat_id": 42}),
-        (messages.search_messages, {"chat_id": 42, "query": "Базы"}),
-        (messages.search_global, {"query": "Базы"}),
+        (messages.search_messages, {"chat_id": 42, "query": "support"}),
+        (messages.search_global, {"query": "support"}),
         (messages.get_pinned_messages, {"chat_id": 42}),
         (messages.get_message_context, {"chat_id": 42, "message_id": 1}),
     ],
@@ -147,6 +148,8 @@ def client(monkeypatch):
 async def test_json_readers_expose_links(client, tool, arguments, linked):
     msg = _text_url_message() if linked else _message(entities=[])
     client.get_messages.return_value = [msg]
+    if tool is messages.search_global:
+        client.return_value = SimpleNamespace(messages=[msg], users=[types.User(id=42)], chats=[])
     if tool is messages.get_message_context:
         client.get_messages.side_effect = [[], msg, []]
     record = json.loads(await tool(**arguments, account="test"))["results"][0]
@@ -177,7 +180,7 @@ async def test_text_readers_expose_links(client, tool, linked):
     if linked:
         assert "links: " + json.dumps([LINK], ensure_ascii=False) in result
     else:
-        assert "links" not in result
+        assert "links: " not in result
 
 
 @pytest.mark.asyncio
